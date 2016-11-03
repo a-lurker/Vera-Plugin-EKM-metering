@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+   <specVersion>
+      <major>1</major>
+      <minor>0</minor>
+   </specVersion>
+
+   <serviceStateTable>
+      <stateVariable sendEvents="no">
+         <name>A_ARG_TYPE_PollEnable</name>
+         <shortCode>pollEnable</shortCode>
+         <dataType>string</dataType>
+      </stateVariable>
+      <stateVariable sendEvents="no">
+         <name>A_ARG_TYPE_MeteringFunction</name>
+         <shortCode>meteringFunction</shortCode>
+         <dataType>string</dataType>
+      </stateVariable>
+      <stateVariable sendEvents="no">
+         <name>A_ARG_TYPE_MeterSerialNumber</name>
+         <shortCode>meterSerialNumber</shortCode>
+         <dataType>string</dataType>
+      </stateVariable>
+      <stateVariable sendEvents="no">
+         <name>A_ARG_TYPE_UseSecondMeter</name>
+         <shortCode>useSecondMeter</shortCode>
+         <dataType>string</dataType>
+      </stateVariable>
+      <stateVariable sendEvents="no">
+         <name>A_ARG_TYPE_MeterModel</name>
+         <shortCode>meterModel</shortCode>
+         <dataType>string</dataType>
+      </stateVariable>
+   </serviceStateTable>
+
+   <actionList>
+      <action>
+         <name>Polling</name>
+         <argumentList>
+            <argument>
+               <name>PollEnable</name>
+               <direction>in</direction>
+               <relatedStateVariable>A_ARG_TYPE_PollEnable</relatedStateVariable>
+            </argument>
+         </argumentList>
+      </action>
+      <action>
+         <name>SetMeteringFunction</name>
+         <argumentList>
+            <argument>
+               <name>MeteringFunction</name>
+               <direction>in</direction>
+               <relatedStateVariable>A_ARG_TYPE_MeteringFunction</relatedStateVariable>
+            </argument>
+         </argumentList>
+      </action>
+      <action>
+         <name>SetMeterSerialNumber</name>
+         <argumentList>
+            <argument>
+               <name>MeterSerialNumber</name>
+               <direction>in</direction>
+               <relatedStateVariable>A_ARG_TYPE_MeterSerialNumber</relatedStateVariable>
+            </argument>
+         </argumentList>
+      </action>
+      <action>
+         <name>SetUseSecondMeter</name>
+         <argumentList>
+            <argument>
+               <name>UseSecondMeter</name>
+               <direction>in</direction>
+               <relatedStateVariable>A_ARG_TYPE_UseSecondMeter</relatedStateVariable>
+            </argument>
+         </argumentList>
+      </action>
+      <action>
+         <name>SetMeterModel</name>
+         <argumentList>
+            <argument>
+               <name>MeterModel</name>
+               <direction>in</direction>
+               <relatedStateVariable>A_ARG_TYPE_MeterModel</relatedStateVariable>
+            </argument>
+         </argumentList>
+      </action>
+   </actionList>
+</scpd>

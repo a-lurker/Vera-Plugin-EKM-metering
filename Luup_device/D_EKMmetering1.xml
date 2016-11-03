@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+   <specVersion>
+      <major>1</major>
+      <minor>0</minor>
+   </specVersion>
+   <device>
+      <deviceType>urn:schemas-a-lurker-com:device:EKMmetering:1</deviceType>
+      <friendlyName>EKM metering</friendlyName>
+      <manufacturer>A Lurker</manufacturer>
+      <staticJson>D_EKMmetering1.json</staticJson>
+      <serviceList>
+         <service>
+            <serviceType>urn:schemas-a-lurker-com:service:EKMmetering:1</serviceType>
+            <serviceId>urn:a-lurker-com:serviceId:EKMmetering1</serviceId>
+            <SCPDURL>S_EKMmetering1.xml</SCPDURL>
+         </service>
+         <service>
+            <serviceType>urn:schemas-micasaverde-com:service:EnergyMetering:1</serviceType>
+            <serviceId>urn:micasaverde-com:serviceId:EnergyMetering1</serviceId>
+            <SCPDURL>S_EnergyMetering1.xml</SCPDURL>
+         </service>
+      </serviceList>
+      <implementationList>
+         <implementationFile>I_EKMmetering1.xml</implementationFile>
+      </implementationList>
+   </device>
+</root>
