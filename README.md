@@ -2,5 +2,5 @@
 
 Connect Vera to an EKM meter and monitor your electricity usage
 
-More informations here :
+More information here:
 - https://www.ekmmetering.com/
