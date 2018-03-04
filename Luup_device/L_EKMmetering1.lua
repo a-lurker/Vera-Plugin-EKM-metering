@@ -1,25 +1,29 @@
 --[[
-    a-lurker, copyright, 16 Jan 2015; updated 10 Jan 2016
+    a-lurker, copyright, 16 Jan 2015;
+ updated 10 Jan 2016
 
-    This program is free software; you can redistribute it and/or
+    This program is free software;
+ you can redistribute it and/or
     modify it under the terms of the GNU General Public License
-    version 3 (GPLv3) as published by the Free Software Foundation; 
+    version 3 (GPLv3) as published by the Free Software Foundation;
+
 
     In addition to the GPLv3 License, this software is only for private
     or home usage. Commercial utilisation is not authorized.
-    
+
     The above copyright notice and this permission notice shall be included
     in all copies or substantial portions of the Software.
 
     This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    but WITHOUT ANY WARRANTY;
+ without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
 ]]
 
 local PLUGIN_NAME     = 'EKMmetering'
 local PLUGIN_SID      = 'urn:a-lurker-com:serviceId:'..PLUGIN_NAME..'1'
-local PLUGIN_VERSION  = '0.51'
+local PLUGIN_VERSION  = '0.52'
 local THIS_LUL_DEVICE = nil
 
 local HA_SID           = 'urn:micasaverde-com:serviceId:HaDevice1'
@@ -116,7 +120,8 @@ PC    --> write more new meter data ... or end of communication: (01 42 30 03 75
 -- Either Request A or Request B will get the meter's attention and is always sent first
 -- Version 3 does not use TX_REQUEST_A or TX_REQUEST_B
 local TX_REQUEST_START = {0x2F, 0x3F}
-local TX_METER_ADDRESS = {0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39}  -- 12 byte meter address; use default: 999999999999
+local TX_METER_ADDRESS = {0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39, 0x39}  -- 12 byte meter address;
+ use default: 999999999999
 local TX_REQUEST_A     = {0x30, 0x30}  -- ****
 local TX_REQUEST_B     = {0x30, 0x31}  -- ****
 local TX_REQUEST_END   = {0x21, 0x0D, 0x0A}  -- returns: 02, data, 30 30 21 0D 0A 03, crc16 (255 Bytes total)
@@ -154,7 +159,8 @@ local TX_WR_START            = {0x01, 0x57, 0x31, 0x02, 0x30, 0x30}
 -----------------------
 -- then one of these write command types with its associated data
 local TX_WR_NEW_ADDRESS      = {0x31, 0x30}  -- 12 bytes new address
-local TX_WR_NEW_PASSWORD     = {0x32, 0x30}  --  8 bytes new password; best to leave this alone - lost passwords stay that way
+local TX_WR_NEW_PASSWORD     = {0x32, 0x30}  --  8 bytes new password;
+ best to leave this alone - lost passwords stay that way
 local TX_WR_MAX_DEMAND_CLR   = {0x34, 0x30}  -- 30 30 30 30 30 30
 -- this write command not found in Version 4
 --local TX4_WR_MAX_DEMAND_TIME  = {0x35, 0x30}  -- **** 1 byte  maximum demand time
@@ -201,7 +207,8 @@ local TX_END_OF_COMMS = {0x01, 0x42, 0x30, 0x03, 0x75} -- crc16 is not used here
 --[[
 Version 3: here is the layout of the data returned, in response to the main request.
 start idx, end idx, variable type, variable name
-0,1,2 = decimal places; I = CosTheta, M = map, P = period, S = string, T = time
+0,1,2 = decimal places;
+ I = CosTheta, M = map, P = period, S = string, T = time
 
 The version 3 meter gives:
    kWh:          one decimal place
@@ -301,7 +308,9 @@ local ver4ReqA = {
 {228, 228, 'M', 'PulseInputHiLo'},        -- see table below
 {229, 229, 'M', 'CurrentDirection'},      -- see table below
 {230, 230, 'M', 'OutputsOnOffStatus'},    -- see table below
-{231, 231, '0', 'DecimalPlaceskWhData'},  -- Typically 2 for V4; depends on the CT; can be: 0,1,2. It's fixed to one dp for V3.
+{231, 231, '0', 'DecimalPlaceskWhData'},  -- Typically 2 for V4;
+ depends on the CT;
+ can be: 0,1,2. It's fixed to one dp for V3.
 --{232, 233, 'S', 'Reserved'},            -- 2 bytes
 {234, 247, 'T', 'DateTime'}
 --{248, 253, 'S', '30 30 21 0D 0A 03'},
@@ -353,7 +362,7 @@ local ver4ReqB = {
 {140, 143, 'I', 'CosThetaL2'},      -- 20 31 30 30 = ' 1.00'
 {144, 147, 'I', 'CosThetaL3'},      -- 4C 30 38 33 = 'L0.83' Note the 'L' (inductive), 'C' (capacitive) or ' '  (resistive)
 {148, 155, '1', 'MaxDemandWatts'},
-{156, 156, 'M', 'MaxDemandWattsTimePeriod'},  -- 15 (31h), 30 (32h) or 60 mins (33h) 
+{156, 156, 'M', 'MaxDemandWattsTimePeriod'},  -- 15 (31h), 30 (32h) or 60 mins (33h)
 {157, 160, '0', 'PulseRatio1'},
 {161, 164, '0', 'PulseRatio2'},
 {165, 168, '0', 'PulseRatio3'},
@@ -369,7 +378,8 @@ local ver4ReqB = {
 
 
 local modelNames = {
--- latest models; as of Jan 2015:
+-- latest models;
+ as of Jan 2015:
     {0x10, 0x17, true,  'OmniMeter I v.3'},      -- firmware 13 or 14
     {0x10, 0x22, true,  'OmniMeter II UL v.3'},  -- firmware 14
     {0x10, 0x24, true,  'OmniMeter Pulse v.4'},  -- firmware 15 or 16 and maybe 17 and 18
@@ -499,7 +509,8 @@ local function crc16(data, startIdx, endIdx)
     -- scan all the incoming data and create the crc
     for byteIdx = startIdx, endIdx do
         -- crc = (crc >> 8) ^ table[(crc ^ ord(ch)) & 0xFF]
-        -- break it all up, to make it a bit more readable; although that may slow us down a little
+        -- break it all up, to make it a bit more readable;
+ although that may slow us down a little
         local rShifted8   = bitFunctions.rshift(crc, 8)
         local readyToMask = bitFunctions.bxor(crc, data[byteIdx])
         local tableKey    = bitFunctions.band(readyToMask, 0xff)
@@ -520,7 +531,8 @@ local function getEKMcrc(data, startIdx, endIdx)
     local EKMcrcMSB = bitFunctions.band(EKMcrcMSB, 0x7f)
     local EKMcrcLSB = bitFunctions.band(crcResult, 0x7f)
 
-    debug('crc16: '..tostring(crcResult)..'d, '..string.format('%04X', crcResult)..'h; EKM crc: '..string.format('%02Xh', EKMcrcLSB)..', '..string.format('%02xh', EKMcrcMSB))
+    debug('crc16: '..tostring(crcResult)..'d, '..string.format('%04X', crcResult)..'h;
+ EKM crc: '..string.format('%02Xh', EKMcrcLSB)..', '..string.format('%02xh', EKMcrcMSB))
 
     local EKMcrcTable = {EKMcrcLSB, EKMcrcMSB}
     return EKMcrcTable
@@ -540,7 +552,9 @@ local function verifyCrc(rxMsgTable)
 end
 
 local function encodeMeterTime()
-    -- year is only two digits; a weekday is 1-7, not 0-6; also note the required '0' pad
+    -- year is only two digits;
+ a weekday is 1-7, not 0-6;
+ also note the required '0' pad
     local nowDate = os.date('%y%m%d') -- year is only two digits
     local nowDofW = tostring(tonumber(os.date('%w'))+1)  -- note: week day is 1-7, not 0-6
     local nowTime = os.date('%H%M%S')
@@ -550,12 +564,14 @@ local function encodeMeterTime()
 end
 
 local function decodeMeterTime()
-    -- year is only two digits; a weekday is 1-7, not 0-6; also note the '0' pad in day
-    local dateTime = luup.variable_get(PLUGIN_SID, 'DateTime', THIS_LUL_DEVICE) or '00000000000000'                
+    -- year is only two digits;
+ a weekday is 1-7, not 0-6;
+ also note the '0' pad in day
+    local dateTime = luup.variable_get(PLUGIN_SID, 'DateTime', THIS_LUL_DEVICE) or '00000000000000'
     local nowMT =
     {
         '20',dateTime:sub(1,2), '/', dateTime:sub(3,4), '/', dateTime:sub(5,6),
-        ' day:', dateTime:sub(7,8), ' ', 
+        ' day:', dateTime:sub(7,8), ' ',
         dateTime:sub(9,10), ':', dateTime:sub(11,12), ':', dateTime:sub(13,14)
     }
     debug('Meter time (rd): '..table.concat(nowMT))
@@ -689,7 +705,7 @@ local function unpackMessage(layoutArray, msgByteArray)
 
     local timeFormat = '%F %X'
     debug('Last update: '..os.date(timeFormat, timeStamp))
-    
+
     timeFormat = '%H:%M'
     updateVariable('LastUpdateHr', os.date(timeFormat, timeStamp))
 
@@ -738,7 +754,8 @@ local function unpackMessage(layoutArray, msgByteArray)
     --local correctionValue = 25
 
     -- update all the variables
-    -- 0,1,2 = decimal places; I = CosTheta, M = map, P = period, S = string, T = time
+    -- 0,1,2 = decimal places;
+    -- Flags: I = CosTheta, M = map, P = period, S = string, T = time
     for k, v in ipairs(layoutArray) do
         local varValue = msgString:sub(v[1],v[2])
 
@@ -748,9 +765,19 @@ local function unpackMessage(layoutArray, msgByteArray)
             varValue = insertDecimalPoint(varValue, tonumber(dpskWh))
         elseif ((v[3] == '0') or (v[3] == '1') or (v[3] == '2')) then  -- the number of decimal points is fixed and determined from the layout array
             varValue = insertDecimalPoint(varValue, tonumber(v[3]))
-        elseif (v[3] == 'I') then  -- it's a CosTheta: a 3 digit number to two decimal places with a leading letter of: ' ', 'L', 'C'
+        elseif (v[3] == 'I') then
+            -- it's a CosTheta: a 3 digit number to two decimal places with a leading letter of: ' ', 'L', 'C'
             local theNumberPart = insertDecimalPoint(varValue:sub(2,4), 2)
-            varValue = varValue:sub(1,1)..theNumberPart
+
+            -- note: capacitors supply reactive power (sign negative) and inductors consume it (sign positive)
+            local sign = varValue:sub(1,1)
+            if ((sign == ' ') or (sign == 'L')) then
+                varValue = theNumberPart
+            elseif (sign == 'C') then
+                varValue = '-'..theNumberPart
+            else
+                debug('CosTheta polarity is unknown')
+            end
         else
             debug('Unknown type in layout array')
         end
@@ -884,7 +911,8 @@ local function sendToMeter(txMsgTable)
     debug('Sending hex: '..byteArrayToHexString(txMsgTable))
     debug('The hex in ASCII: '..txMsg)
 
-    -- result can be nil, false, or true;  we'll test for true
+    -- result can be nil, false, or true;
+  we'll test for true
     local result = luup.io.write(txMsg)
     if (result ~= true) then
         m_TaskHandle = luup.task('Cannot send message - comms error', TASK_ERROR, PLUGIN_NAME, m_TaskHandle)
@@ -943,7 +971,8 @@ local TRANSACTION_TIMEOUT_INTERVAL_SECS = 5
 
 ]]
 
--- time out target; function needs to be global
+-- time out target;
+ function needs to be global
 function interchangeTimeOut()
     COMMS_STATE = IDLE
 end
@@ -1152,7 +1181,9 @@ local function dailyResetCheck()
     -- if dawn has just occurred then luup.sunrise() will leap ahead by approx 24 hours
     -- reset the resettable kWh counters in the meter
     countersNextReset = tonumber(countersNextReset)
-    if (nextReset > countersNextReset) then
+
+    -- use a small negative offset to iron out floating point precision problems
+    if ((nextReset-1) > countersNextReset) then
         debug('Dawn occurred: resetting the kWh counters',50)
         m_MeterWrRegister = TX_WR_ZERO_KWH
         m_MeterWrData     = {}
@@ -1164,7 +1195,8 @@ local function dailyResetCheck()
     end
 end
 
--- time out target; function needs to be global
+-- time out target;
+ function needs to be global
 function readMeterEKM()
     -- make sure there are no communications already in progress
     if (COMMS_STATE ~= IDLE) then return end
@@ -1175,7 +1207,8 @@ function readMeterEKM()
 end
 
 -- Poll the meter for data
--- time out target; function needs to be global
+-- time out target;
+ function needs to be global
 function pollMeter()
     if (m_PollEnable ~= '1') then return end
 
@@ -1197,7 +1230,8 @@ function polling(pollEnable)
     updateVariable('PollEnable', m_PollEnable)
 end
 
--- user service: set the metering function: from grid, to grid or net; from-to grid
+-- user service: set the metering function: from grid, to grid or net;
+ from-to grid
 -- function needs to be global
 function setMeteringFunction(meteringFunction)
     if (not ((meteringFunction == '0') or (meteringFunction == '1') or (meteringFunction == '2'))) then return end
@@ -1232,7 +1266,8 @@ function setMeterModel(meterModel)
 end
 
 local function specificDataRead()
-    -- NOT IMPLEMENTED;  use the dash software instead
+    -- NOT IMPLEMENTED;
+  use the dash software instead
     -- 1) need to turn off polling
     -- 2) ensure any last reads have finished
     -- 3) specify the read register and extract the result
@@ -1246,7 +1281,8 @@ local function specificDataRead()
 end
 
 local function specificDataWrite()
-    -- NOT IMPLEMENTED;  use the dash software instead
+    -- NOT IMPLEMENTED;
+  use the dash software instead
     -- 1) need to turn off polling
     -- 2) ensure any last reads have finished
     -- 3) specify the write register and write the value byte array
@@ -1261,7 +1297,7 @@ local function specificDataWrite()
 end
 
 -- Start up the plugin
--- Refer to: I_EKMmetering1.xml 
+-- Refer to: I_EKMmetering1.xml
 -- <startup>luaStartUp</startup>
 -- function needs to be global
 function luaStartUp(lul_device)
@@ -1372,7 +1408,8 @@ function luaStartUp(lul_device)
     -- The user must enter a meter model number
     if ((meterModel == nil) or (meterModel == '')) then
         -- first time round, this will create the variable but
-        -- it remains invalid; the user must set it
+        -- it remains invalid;
+ the user must set it
         m_MeterModel = ''
         luup.variable_set(PLUGIN_SID, 'MeterModel', m_MeterModel, THIS_LUL_DEVICE)
     else
@@ -1383,7 +1420,8 @@ function luaStartUp(lul_device)
     meterSerialNumber = meterSerialNumber:match('^(%d%d%d%d%d%d%d%d%d%d%d%d)')
     if ((meterSerialNumber == nil) or (meterSerialNumber == '') or (meterSerialNumber:len() ~= 12)) then
         -- first time round, this will create the variable but
-        -- it remains invalid; the user must set it
+        -- it remains invalid;
+ the user must set it
         meterSerialNumber = ''
         luup.variable_set(PLUGIN_SID, 'MeterSerialNumber', meterSerialNumber, THIS_LUL_DEVICE)
         -- TX_METER_ADDRESS equals the default address '999999999999' at this point
