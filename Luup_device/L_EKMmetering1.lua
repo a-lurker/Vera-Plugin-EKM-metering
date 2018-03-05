@@ -314,6 +314,7 @@ DPS_IDX = 37
 
 --[[ all in hex
 PulseInputHiLo  CurrentDirection  OutputsOnOffStatus  MaxDemandWattsAutoReset  MaxDemandWattsTimePeriod
+                L1, L2, L3
 1,1,1 = 30	    F,F,F = 31        off / off = 31      off     = 30             15 mins = 31
 1,1,0 = 31	    F,F,R = 32        off /  on = 32      monthly = 31             30 mins = 32
 1,0,1 = 32	    F,R,F = 33         on / off = 33      weekly  = 32             60 mins = 33
@@ -752,7 +753,10 @@ local function unpackMessage(layoutArray, msgByteArray)
             -- it's a CosTheta: a 3 digit number to two decimal places with a leading letter of: ' ', 'L', 'C'
             local theNumberPart = insertDecimalPoint(varValue:sub(2,4), 2)
 
-            -- note: capacitors supply reactive power (sign negative) and inductors consume it (sign positive)
+            -- Note: capacitors supply reactive power (sign negative) and inductors consume it (sign positive)
+            -- Power factor (PF) is always a number between zero and one but a PF less than one is caused either
+            -- by a leading or lagging phase difference. While not technically correct, we will add a sign to the
+            -- PF to indicate same. In this manner we can at least plot it on a graph.
             local sign = varValue:sub(1,1)
             if ((sign == ' ') or (sign == 'L')) then
                 varValue = theNumberPart
