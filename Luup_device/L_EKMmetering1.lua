@@ -19,7 +19,7 @@
 
 local PLUGIN_NAME     = 'EKMmetering'
 local PLUGIN_SID      = 'urn:a-lurker-com:serviceId:'..PLUGIN_NAME..'1'
-local PLUGIN_VERSION  = '0.53'
+local PLUGIN_VERSION  = '0.53a'
 local THIS_LUL_DEVICE = nil
 
 local HA_SID           = 'urn:micasaverde-com:serviceId:HaDevice1'
@@ -215,7 +215,7 @@ depending on the CT in use. Everything else has the same number of DPS as the ve
 ]]
 
 local ver3Req = {
---{  1,  1, 'S', 'SOH'},
+--{  1,  1, 'S', 'STX'},
 --{  2,   3, 'N', 'MeterName'},
 --{  4,   4, 'N', 'MeterFirmware'},
 {  5,  16, 'S', 'MeterAddress'},
@@ -262,7 +262,7 @@ local ver3Req = {
 -- Version 4: here is the layout of the data returned, in response to the main request A.
 -- start idx, end idx, variable type, variable name
 local ver4ReqA = {
---{  1,  1, 'S', 'SOH'},
+--{  1,  1, 'S', 'STX'},
 --{  2,   3, 'N', 'MeterName'},
 --{  4,   4, 'N', 'MeterFirmware'},
 {  5,  16, 'S', 'MeterAddress'},
@@ -328,7 +328,7 @@ PulseInputHiLo  CurrentDirection  OutputsOnOffStatus  MaxDemandWattsAutoReset  M
 -- Version 4: here is the layout of the data returned, in response to the main request B.
 -- start idx, end idx, variable type, variable name
 local ver4ReqB = {
---{  1,  1, 'S', 'SOH'},
+--{  1,  1, 'S', 'STX'},
 --{  2,   3, 'N', 'MeterName'},
 --{  4,   4, 'N', 'MeterFirmware'},
 {  5,  16, 'S', 'MeterAddress'},
@@ -835,7 +835,7 @@ end
 
 -- Using the RAW protocol: this function gets called for every RX'ed byte
 local function updateMsgBuffer(RXedMsgByte)
-    local SOH_CHAR      = 0x01
+    local STX_CHAR      = 0x02
     local ACK_CHAR      = 0x06
     local RX_MSG_LENGTH = 255
 
@@ -851,8 +851,8 @@ local function updateMsgBuffer(RXedMsgByte)
         return bufferFilling, crcError, ackRXed
     end
 
-    -- SOH signifies the start of a reply, so clear the RX buffer
-    if (RXedMsgByte == SOH_CHAR) then
+    -- STX signifies the start of a reply, so clear the RX buffer
+    if (RXedMsgByte == STX_CHAR) then
         rxMsgTable = {}
     end
 
