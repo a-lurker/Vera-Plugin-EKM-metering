@@ -1,5 +1,5 @@
 --[[
-    a-lurker, copyright, 16 Jan 2015; updated 10 Jan 2016
+    a-lurker, copyright, 16 Jan 2015; updated 30 June 2020
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -19,7 +19,7 @@
 
 local PLUGIN_NAME     = 'EKMmetering'
 local PLUGIN_SID      = 'urn:a-lurker-com:serviceId:'..PLUGIN_NAME..'1'
-local PLUGIN_VERSION  = '0.52'
+local PLUGIN_VERSION  = '0.53'
 local THIS_LUL_DEVICE = nil
 
 local HA_SID           = 'urn:micasaverde-com:serviceId:HaDevice1'
@@ -310,7 +310,7 @@ local ver4ReqA = {
 }
 
 -- array index of DecimalPlaceskWhData in the array ver4ReqA immediately above
-DPS_IDX = 37
+local DPS_IDX = 37
 
 --[[ all in hex
 PulseInputHiLo  CurrentDirection  OutputsOnOffStatus  MaxDemandWattsAutoReset  MaxDemandWattsTimePeriod
@@ -521,7 +521,7 @@ local function getEKMcrc(data, startIdx, endIdx)
     local EKMcrcMSB = bitFunctions.band(EKMcrcMSB, 0x7f)
     local EKMcrcLSB = bitFunctions.band(crcResult, 0x7f)
 
-    debug('crc16: '..tostring(crcResult)..'d, '..string.format('%04X', crcResult)..'h; EKM crc: '..string.format('%02Xh', EKMcrcLSB)..', '..string.format('%02xh', EKMcrcMSB))
+    debug(string.format('crc16: %i dec, %04X hex; EKM crc: %02X hex, %02X hex', crcResult, crcResult, EKMcrcMSB, EKMcrcLSB))
 
     local EKMcrcTable = {EKMcrcLSB, EKMcrcMSB}
     return EKMcrcTable
