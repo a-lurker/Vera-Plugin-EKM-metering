@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <implementation>
    <settings>
-      <protocol>raw</protocol>
       <handleChildren>1</handleChildren>
    </settings>
    <files>L_EKMmetering1.lua</files>
-   <incoming>
-      <lua>processIncoming(lul_data)</lua>
-   </incoming>
    <startup>luaStartUp</startup>
    <actionList>
      <action>

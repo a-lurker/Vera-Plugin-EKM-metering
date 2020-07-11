@@ -1,5 +1,5 @@
 --[[
-    a-lurker, copyright, 16 Jan 2015; updated 30 June 2020
+    a-lurker, copyright, 16 Jan 2015; updated 1 July 2020
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -19,7 +19,7 @@
 
 local PLUGIN_NAME     = 'EKMmetering'
 local PLUGIN_SID      = 'urn:a-lurker-com:serviceId:'..PLUGIN_NAME..'1'
-local PLUGIN_VERSION  = '0.53a'
+local PLUGIN_VERSION  = '0.54'
 local THIS_LUL_DEVICE = nil
 
 local HA_SID           = 'urn:micasaverde-com:serviceId:HaDevice1'
@@ -34,7 +34,13 @@ local MAIN_REQUEST_V4B = '4B'
 local IP_PORT   = '50000'
 local ipAddress = ''   -- the ATC1000/iSerial IP address
 
-local rxMsgTable = {}
+-- The array of functions to execute for each COMMS_STATE value
+local COMM_STATES   = {}
+local IDLE          = 12
+local COMMS_STATE   = IDLE
+local RX_FINISHED   = 0
+local RX_ACK_LENGTH = 1
+local RX_MSG_LENGTH = 255
 
 local TASK_ERROR = 2
 local m_TaskHandle = -1
@@ -64,8 +70,9 @@ local m_MeterRdRegister = {}
 local m_MeterWrRegister = {}
 local m_MeterWrData     = {}
 
--- http://bitop.luajit.org/api.html
-local bitFunctions = require('bit')
+-- http://w3.impa.br/~diego/software/luasocket/reference.html
+local socket = require('socket')
+local m_tcp = nil
 
 --[[
 
@@ -94,18 +101,23 @@ b) a single write acknowledge byte equal to 0x06
 
 Sequence for reading:
 PC    --> request main data (contains meter address)
+      ** 1 sec delay **
 Meter <-- main data
 PC    --> read specific data request OR end of communication: (01 42 30 03 75)
+      ** 1 sec delay **
 Meter <-- specific data
 PC    --> read more specific data request ... OR end of communication: (01 42 30 03 75)
 
 
 Sequence for writing:
 PC    --> request main data (contains meter address)
+      ** 1 sec delay **
 Meter <-- main data
 PC    --> password
+      ** 1 sec delay **
 Meter <-- 06
 PC    --> write new meter data
+      ** 1 sec delay **
 Meter <-- 06
 PC    --> write more new meter data ... or end of communication: (01 42 30 03 75)
 
@@ -215,7 +227,7 @@ depending on the CT in use. Everything else has the same number of DPS as the ve
 ]]
 
 local ver3Req = {
---{  1,  1, 'S', 'STX'},
+--{  1,   1, 'S', 'STX'},
 --{  2,   3, 'N', 'MeterName'},
 --{  4,   4, 'N', 'MeterFirmware'},
 {  5,  16, 'S', 'MeterAddress'},
@@ -262,7 +274,7 @@ local ver3Req = {
 -- Version 4: here is the layout of the data returned, in response to the main request A.
 -- start idx, end idx, variable type, variable name
 local ver4ReqA = {
---{  1,  1, 'S', 'STX'},
+--{  1,   1, 'S', 'STX'},
 --{  2,   3, 'N', 'MeterName'},
 --{  4,   4, 'N', 'MeterFirmware'},
 {  5,  16, 'S', 'MeterAddress'},
@@ -314,21 +326,21 @@ local DPS_IDX = 37
 
 --[[ all in hex
 PulseInputHiLo  CurrentDirection  OutputsOnOffStatus  MaxDemandWattsAutoReset  MaxDemandWattsTimePeriod
-                L1, L2, L3
-1,1,1 = 30	    F,F,F = 31        off / off = 31      off     = 30             15 mins = 31
-1,1,0 = 31	    F,F,R = 32        off /  on = 32      monthly = 31             30 mins = 32
-1,0,1 = 32	    F,R,F = 33         on / off = 33      weekly  = 32             60 mins = 33
-1,0,0 = 33	    R,F,F = 34         on /  on = 34      daily   = 33
-0,1,1 = 34	    F,R,R = 35                            hourly  = 34
-0,1,0 = 35	    R,F,R = 36
-0,0,1 = 36	    R,R,F = 37
-0,0,0 = 37	    R,R,R = 38
+                  L1, L2, L3
+1,1,1 = 30        F,F,F = 31        off / off = 31      off     = 30             15 mins = 31
+1,1,0 = 31        F,F,R = 32        off /  on = 32      monthly = 31             30 mins = 32
+1,0,1 = 32        F,R,F = 33         on / off = 33      weekly  = 32             60 mins = 33
+1,0,0 = 33        R,F,F = 34         on /  on = 34      daily   = 33
+0,1,1 = 34        F,R,R = 35                            hourly  = 34
+0,1,0 = 35        R,F,R = 36
+0,0,1 = 36        R,R,F = 37
+0,0,0 = 37        R,R,R = 38
 --]]
 
 -- Version 4: here is the layout of the data returned, in response to the main request B.
 -- start idx, end idx, variable type, variable name
 local ver4ReqB = {
---{  1,  1, 'S', 'STX'},
+--{  1,   1, 'S', 'STX'},
 --{  2,   3, 'N', 'MeterName'},
 --{  4,   4, 'N', 'MeterFirmware'},
 {  5,  16, 'S', 'MeterAddress'},
@@ -424,7 +436,7 @@ local crcTable = {
   0x8201, 0x42C0, 0x4380, 0x8341, 0x4100, 0x81C1, 0x8081, 0x4040
   }
 
--- don't change this, it won't do anything. Use the debugEnabled flag instead
+-- Don't change this, it won't do anything. Use the debugEnabled flag instead.
 local DEBUG_MODE = false
 
 local function debug(textParm, logLevel)
@@ -445,8 +457,8 @@ local function debug(textParm, logLevel)
     end
 end
 
--- If non existent, create the variable
--- Update the variable only if needs to be
+-- If non existent, create the variable. Update
+-- the variable, only if it needs to be updated
 local function updateVariable(varK, varV, sid, id)
     if (sid == nil) then sid = PLUGIN_SID      end
     if (id  == nil) then  id = THIS_LUL_DEVICE end
@@ -464,6 +476,86 @@ local function updateVariable(varK, varV, sid, id)
     if ((currentValue ~= newValue) or (currentValue == nil)) then
         luup.variable_set(sid, varK, newValue, id)
     end
+end
+
+-- Log the outcome (hex) - only used for testing
+local function tableDump(userMsg, byteTab)
+    if (not DEBUG_MODE) then return end
+
+    if (byteTab == nil) then debug(userMsg..' is nil') return '' end
+    local tabLen = #byteTab
+
+    local hex = ''
+    local asc = ''
+    local hexTab = {}
+    local ascTab = {'   '}
+    local dmpTab = {userMsg..'\n'}
+
+    for i=1, tabLen do
+        local ord = byteTab[i]
+        hex = string.format('%02X', ord)
+        asc = '.'
+        if ((ord >= 32) and (ord <= 126)) then asc = string.char(ord) end
+
+        table.insert(hexTab, hex)
+        table.insert(ascTab, asc)
+
+        if ((i % 16 == 0) or (i == tabLen))then
+            table.insert(ascTab,'\n')
+            table.insert(dmpTab,table.concat(hexTab, ' '))
+            table.insert(dmpTab,table.concat(ascTab))
+            hexTab = {}
+            ascTab = {'   '}
+        elseif (i % 8 == 0) then
+            table.insert(hexTab, '')
+            table.insert(ascTab, '')
+        end
+    end
+
+    local dmpStr = table.concat(dmpTab)
+    debug(dmpStr)
+    return dmpStr
+end
+
+-- Bitwise xor
+-- https://stackoverflow.com/questions/5977654/how-do-i-use-the-bitwise-operator-xor-in-lua
+-- This is about three times quicker than this bit library:
+-- http://files.luaforge.net/releases/bit/bit/luabitv0.4
+local function bxor(a,b)
+    local p,c=1,0
+    while a>0 and b>0 do
+        local ra,rb=a%2,b%2
+        if ra~=rb then c=c+p end
+        a,b,p=(a-ra)/2,(b-rb)/2,p*2
+    end
+    if a<b then a=b end
+    while a>0 do
+        local ra=a%2
+        if ra>0 then c=c+p end
+        a,p=(a-ra)/2,p*2
+    end
+    return c
+end
+
+-- Bitwise and
+-- https://stackoverflow.com/questions/5977654/how-do-i-use-the-bitwise-operator-xor-in-lua
+local function band(a,b)
+    local p,c=1,0
+    while a>0 and b>0 do
+        local ra,rb=a%2,b%2
+        if ra+rb>1 then c=c+p end
+        a,b,p=(a-ra)/2,(b-rb)/2,p*2
+    end
+    return c
+end
+
+-- https://stackoverflow.com/questions/51559181/sha512-pure-lua-5-1-adaptation
+-- 32-bit bitwise functions
+-- Only low 32 bits of function arguments matter, high bits are ignored
+-- The result is an integer 0..(2^32-1)
+local function rshift(x, n)
+   x = x % 0x100000000 / 2^n  -- 32 bits
+   return x - x % 1
 end
 
 --[[
@@ -491,8 +583,8 @@ local CRC16TestData4 =
 local function crc16(data, startIdx, endIdx)
     startIdx = startIdx or 1
     endIdx   = endIdx   or #data
-    debug('startIdx: '..tostring(startIdx))
-    debug('endIdx: '..tostring(endIdx))
+    debug('CRC startIdx: '..tostring(startIdx))
+    debug('CRC endIdx: '..tostring(endIdx))
 
     --local crc = 0x0000  -- standard crc16
     local crc = 0xffff  -- MODBUS crc16 is the same as crc16 but the crc is initialised to 0xffff
@@ -500,26 +592,26 @@ local function crc16(data, startIdx, endIdx)
     -- scan all the incoming data and create the crc
     for byteIdx = startIdx, endIdx do
         -- crc = (crc >> 8) ^ table[(crc ^ ord(ch)) & 0xFF]
-        -- break it all up, to make it a bit more readable; although that may slow us down a little
-        local rShifted8   = bitFunctions.rshift(crc, 8)
-        local readyToMask = bitFunctions.bxor(crc, data[byteIdx])
-        local tableKey    = bitFunctions.band(readyToMask, 0xff)
+        -- break it all up, to make it a bit more readable
+        local rShifted8   = rshift(crc, 8)
+        local readyToMask = bxor(crc, data[byteIdx])
+        local tableKey    = band(readyToMask, 0xff)
         local tableValue  = crcTable[tableKey+1]  -- Lua tables typically start at 1 not 0
 
-        crc = bitFunctions.bxor(rShifted8, tableValue)
+        crc = bxor(rShifted8, tableValue)
     end
 
     return crc
 end
 
--- get the standard MODBUS crc16 and modify to suit the EKM meter
+-- Get the standard MODBUS crc16 and modify to suit the EKM meter
 local function getEKMcrc(data, startIdx, endIdx)
     local crcResult = crc16(data, startIdx, endIdx)
 
     -- EKM meter uses 7 bit RS485, so bit 8 = 0
-    local EKMcrcMSB = bitFunctions.rshift(crcResult, 8)
-    local EKMcrcMSB = bitFunctions.band(EKMcrcMSB, 0x7f)
-    local EKMcrcLSB = bitFunctions.band(crcResult, 0x7f)
+    local EKMcrcMSB = rshift(crcResult, 8)
+    local EKMcrcMSB = band(EKMcrcMSB, 0x7f)
+    local EKMcrcLSB = band(crcResult, 0x7f)
 
     debug(string.format('crc16: %i dec, %04X hex; EKM crc: %02X hex, %02X hex', crcResult, crcResult, EKMcrcMSB, EKMcrcLSB))
 
@@ -578,35 +670,6 @@ local function insertDecimalPoint(str, dps)
     local strFormat = '%.'..dps..'f'
 
     return string.format(strFormat, theNumber)
-end
-
-local function stringToByteArray(str)
-    local result = {}
-    for i = 1, str:len() do
-        result[i] = str:byte(i)
-    end
-    return result
-end
-
--- used to display message debug strings
-local function byteArrayToHexString(byteArray)
-    if (byteArray == nil) then debug ('byteArray is nil in byteArrayToHexString') return '' end
-
-    local str = {}
-    for i = 1, #byteArray do
-        str[i] = string.format('%02X', byteArray[i])
-    end
-    return table.concat(str,',')
-end
-
-local function byteArrayToString(byteArray)
-    if (byteArray == nil) then debug ('byteArray is nil in byteArrayToString') return '' end
-
-    local str = {}
-    for i = 1, #byteArray do
-        str[i] = string.char(byteArray[i])
-    end
-    return table.concat(str)
 end
 
 local function appendTable(destination, source)
@@ -670,7 +733,7 @@ local function makeSpecificWriteRequest(writeRegister, writeData)
     return txMsgTable
 end
 
--- extract the variable values out of the returned messages
+-- Extract the variable values out of the returned messages
 local function unpackMessage(layoutArray, msgByteArray)
 
     -- just make sure we have something to work with
@@ -696,7 +759,7 @@ local function unpackMessage(layoutArray, msgByteArray)
 
     -- find the model: it's stored as two bytes
     local modelFound = false
-    local meterName  = "Unknown name"
+    local meterName  = 'Unknown name'
     for k, v in ipairs(modelNames) do
         modelFound = (v[2] == msgByteArray[3]) and (v[1] == msgByteArray[2])
         if modelFound then
@@ -721,7 +784,7 @@ local function unpackMessage(layoutArray, msgByteArray)
     debug('MeterFirmware: '..meterFirmware)
 
     -- get the bytes as a string
-    local msgString = byteArrayToString(msgByteArray)
+    local msgString = string.char(unpack(msgByteArray))
 
     -- Extract the DecimalPlaceskWhData, so we know how many decimal points to use later.
     -- The amount of decimal points only varies for V4 models.
@@ -783,7 +846,7 @@ local function unpackMessage(layoutArray, msgByteArray)
     updateVariable('Watts', wattsTotal, ENERGY_METER_SID)
 
     -- validate if a secondary meter is in use
-	if ((m_UseSecondMeter == '') or (m_UseSecondMeter == nil)) then m_UseSecondMeter = '0' end
+    if ((m_UseSecondMeter == '') or (m_UseSecondMeter == nil)) then m_UseSecondMeter = '0' end
 
     local totalkWh        = tonumber(luup.variable_get(PLUGIN_SID, 'TotalkWh',        THIS_LUL_DEVICE) or 0)
     local totalReversekWh = tonumber(luup.variable_get(PLUGIN_SID, 'TotalReversekWh', THIS_LUL_DEVICE) or 0)
@@ -833,81 +896,168 @@ local function unpackMessage(layoutArray, msgByteArray)
     decodeMeterTime()
 end
 
--- Using the RAW protocol: this function gets called for every RX'ed byte
-local function updateMsgBuffer(RXedMsgByte)
-    local STX_CHAR      = 0x02
-    local ACK_CHAR      = 0x06
-    local RX_MSG_LENGTH = 255
-
-    local bufferFilling = true
-    local crcError      = true
-    local ackRXed       = false
-
-    -- ACK is a solitary reply to a sent message, so clear the RX buffer
-    if (RXedMsgByte == ACK_CHAR) then
-        rxMsgTable = {}
-        debug('Received ACK')
-        ackRXed = true
-        return bufferFilling, crcError, ackRXed
-    end
-
-    -- STX signifies the start of a reply, so clear the RX buffer
-    if (RXedMsgByte == STX_CHAR) then
-        rxMsgTable = {}
-    end
-
-    -- fill the RX message buffer
-    table.insert(rxMsgTable, RXedMsgByte)
-
-    -- if the RX buffer is full then validate the checksum
-    if (#rxMsgTable == RX_MSG_LENGTH) then
-        bufferFilling = false
-        debug('Incoming buffer is full: '..byteArrayToHexString(rxMsgTable))
-        crcError = verifyCrc(rxMsgTable)
-        if (crcError) then
-            rxMsgTable = {}
-            debug ('Incoming: crc error detected')
+local function getRXmsg(expectedLength)
+    local function checkStatus(status)
+        local err = true
+        if (status == nil) then
+            debug('Status: OK')
+            err = false
+        elseif (status == 'timeout') then
+            -- timeout is set to 0.5 seconds
+            debug('Status: timeout')
+        elseif (status == 'closed') then
+            -- If m_tcp:settimeout(x) is not set then the tx/rx can block
+            -- until the connection is closed.
+            debug('Status: closed')
         else
-            debug ('Incoming: crc is OK')
+            debug('Status: ????')
+        end
+        return err
+    end
+
+    -- If no timeout were set, this receive would block till the far end 'closed':
+    -- With '*a' passed to receive(), the read expects exactly 1024 bytes and waits for 1024 bytes or until
+    -- timeout or closed. If timeout or close occurs, anything less than 1024 bytes in the rx buffer is passed
+    -- through in 'partial'. However if we know the expected rx length, we can pass that into the receive
+    -- function and it will stop once the bytes are rx'ed and pass them back in 's' as opposed to 'partial'
+    -- In this latter case, status will be nil. If a problem occurs partial can be empty or contain something.
+
+    -- BLOCKING, BLOCKING ..... till something happens: ie some rx'ed data, timeout or closed
+    local s, status, partial = m_tcp:receive(expectedLength)
+    local err = checkStatus(status)
+    -- exit if timeout or closed
+    if (err) then
+        debug(s)
+        debug(status)
+        debug(partial)
+        return err, {}
+    end
+
+    if ((type(partial) == 'string') and (#partial == 0)) then
+        debug('Partial is empty: alarm panel probably did not reply')
+        return true, {}
+    end
+    if ((type(partial) == 'string') and (#partial ~= 0)) then debug('Partial length is: '..#partial) end
+
+    local rxMsg = s or partial
+    -- convert the rx'ed msg to a byte table - we like tables
+    local msg = {rxMsg:byte(1,#rxMsg)}
+    return false, msg
+end
+
+-- We arrive here one second after the transmit message is sent; via doProcessIncomingEKM()
+local function doRXmsgEKM(expectedLengthStr)
+    local STX_CHAR = 0x02
+    local ACK_CHAR = 0x06
+
+    -- expectedLength is either RX_MSG_LENGTH or 1
+    local expectedLength = tonumber(expectedLengthStr)
+
+    -- So why are we using socket.select instead of m_tcp:settimeout(xyz)?
+    -- Because I couldn't make it work: settimeout always timed out for some reason.
+    -- We've already delayed one second, so the response should already be in the rx buffer.
+
+    -- BLOCKING, BLOCKING ..... till something happens: ie some rx'ed data or timeout
+    -- status will be 'timeout' or nil
+    local RX_TIME_OUT = 0.05   -- 50 msec: just some short value that seems reasonable
+    local rxlist, _, selectStatus = socket.select ({m_tcp}, nil, RX_TIME_OUT)
+
+    if (selectStatus == 'timeout') then
+        debug('RX_TIME_OUT occurred',50)
+        return true, {}
+    end
+
+    local err, rxMsgTable = getRXmsg(expectedLength)
+    tableDump('Received:', rxMsgTable)
+
+    if (err) then return true, {} end
+
+    -- is a single byte ACK response expected? ie instead of RX_MSG_LENGTH
+    if (expectedLength == 1) then
+        if (rxMsgTable[1] == ACK_CHAR) then
+            debug('Received ACK as expected')
+            return false, {}
+        else
+            debug('Probably lost sync with EKM meter: 1st char not ACK')
+            return true, {}
+        end
+    end
+
+    -- If the reply was meant to be a single ACK then it has now been processed.
+    -- So at this point we assume we have a 255 byte long response.
+
+    -- for a valid RX_MSG_LENGTH long rx message, the 1st byte must be STX
+    if (rxMsgTable[1] ~= STX_CHAR) then
+        debug('Probably lost sync with EKM meter: 1st char not STX')
+        return true, {}
+    end
+
+    -- if the RX buffer is ok so far, then validate the checksum
+    if (expectedLength == RX_MSG_LENGTH) then
+        err = verifyCrc(rxMsgTable)
+        if (err) then
+            debug ('Incoming: CRC error detected')
+            return true, {}
+        else
+            debug ('Incoming: CRC is OK')
         end
     end
 
     -- if the RX buffer has overflowed (somehow), then that's a problem
     if (#rxMsgTable > RX_MSG_LENGTH) then
-        bufferFilling = false
-        debug('Incoming buffer overflowed: '..byteArrayToHexString(rxMsgTable))
-        rxMsgTable = {}
+        debug('Incoming buffer overflowed')
+        return true, {}
     end
 
-    return bufferFilling, crcError, ackRXed
+    return err, rxMsgTable
 end
 
-local function sendToMeter(txMsgTable)
-    -- If we send a message we can always expect a new reply.
-    -- So clear the RX msg buffer, given that expectation.
-    rxMsgTable = {}
-
-    if (not luup.io.is_connected(THIS_LUL_DEVICE)) then
-        m_TaskHandle = luup.task('No LAN connection to meter', TASK_ERROR, PLUGIN_NAME, m_TaskHandle)
-        debug('No LAN connection to meter')
-        --luup.set_failure(1,THIS_LUL_DEVICE)
-        return false
+-- We arrive here one second after the transmit message is sent.
+-- Must be global: delay timeout target
+function doProcessIncomingEKM(expectedLengthStr)
+    if (COMM_STATES[COMMS_STATE] == nil) then
+        debug('COMMS_STATES or its index is invalid: '..COMMS_STATE)
+        return
     end
 
-    local txMsg = byteArrayToString(txMsgTable)
-    debug('Sending hex: '..byteArrayToHexString(txMsgTable))
-    debug('The hex in ASCII: '..txMsg)
+    local err, rxMsgTable = doRXmsgEKM(expectedLengthStr)
 
-    -- result can be nil, false, or true;  we'll test for true
-    local result = luup.io.write(txMsg)
-    if (result ~= true) then
-        m_TaskHandle = luup.task('Cannot send message - comms error', TASK_ERROR, PLUGIN_NAME, m_TaskHandle)
-        debug('Cannot send message - comms error')
-        --luup.set_failure(1,THIS_LUL_DEVICE)
-        return false
+    debug('COMMS_STATE is: '..COMMS_STATE)
+    COMM_STATES[COMMS_STATE](err, rxMsgTable)
+end
+
+local function sendToMeter(txMsgTable, expectedLength)
+    local txMsg = string.char(unpack(txMsgTable))
+
+    tableDump('Sending:', txMsgTable)
+
+    local sentCnt, status, lastByteIdx = m_tcp:send(txMsg)
+    if (sentCnt == nil) then
+        m_tcp:close()
+        debug('Status is: '..status)
+        debug('idx of last byte sent is: '..tostring(lastByteIdx))
+
+        -- if we get a tx error, don't even bother to check the for a rx msg
+        return false   -- return not OK
     end
 
-    return true
+    -- The returned data is always 255 bytes, unless it is just 0x06 ie ACK
+    local expectedLengthStr = tostring(RX_MSG_LENGTH)
+
+    if (expectedLength == RX_FINISHED) then
+        -- no more rx data is expected
+        debug('Transaction completed')
+        return true   -- return OK
+    elseif (expectedLength == RX_ACK_LENGTH) then
+        expectedLengthStr = tostring(RX_ACK_LENGTH)
+    end
+
+    -- At 9600 baud it's 0.266 secs per 255 byte message.
+    -- So we'll check for a response in one second from now.
+    -- That's the shortest time we can set up.
+    luup.call_delay('doProcessIncomingEKM', 1, expectedLengthStr)
+
+    return true   -- return OK
 end
 
 -- COMMS_STATES
@@ -924,10 +1074,7 @@ local WR_SPECIFIC_DATA               = 8
 local EXPECTING_VX_REQ_DATA_IGNORE_2 = 9
 local EXPECTING_PW_ACK               = 10
 local EXPECTING_WR_ACK               = 11
-
-local IDLE                           = 12
-
-local COMMS_STATE                    = IDLE
+-- see also IDLE = 12
 
 local TRANSACTION_TIMEOUT_INTERVAL_SECS = 5
 
@@ -940,10 +1087,10 @@ local TRANSACTION_TIMEOUT_INTERVAL_SECS = 5
      +-Wr-+
 -----|    |--------------------------------------------------------------------
 
-     +------ExChng------+
+     +---t_t_interval---+
 -----|        5s        |------------------------------------------------------
 
-     +--------------ExChng*2--------------+
+     +-----------t_t_interval*2-----------+
 -----|                 10s                |------------------------------------
 
                                           readMeterEKM()
@@ -952,12 +1099,12 @@ local TRANSACTION_TIMEOUT_INTERVAL_SECS = 5
                                           +-----Rd-----+
 ------------------------------------------|            |-----------------------
 
-                                          +------ExChng------+
+                                          +---t_t_interval---+
 ------------------------------------------|        5s        |-----------------
 
 ]]
 
--- time out target; function needs to be global
+-- Time out target; function needs to be global
 function interchangeTimeOut()
     COMMS_STATE = IDLE
 end
@@ -970,14 +1117,14 @@ local function setTxRxInterchangeTimeOut()
 end
 
 -- The array of functions to execute for each COMMS_STATE value
-local COMM_STATES =
+COMM_STATES =
 {
 --------------------------------------------------------------------------------
 -- readMainData
 --------------------------------------------------------------------------------
     [RD_MAIN_DATA] =
-        function(junk)
-            debug('Entered RD_MAIN_DATA')
+        function()
+            debug('Started RD_MAIN_DATA transaction')
             setTxRxInterchangeTimeOut()
 
             local txMsgTable = {}
@@ -988,14 +1135,12 @@ local COMM_STATES =
                 txMsgTable = makeMainRequest(MAIN_REQUEST_3)
                 COMMS_STATE = EXPECTING_V3_REQ_DATA
             end
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_MSG_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_V4_REQ_A_DATA] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError = updateMsgBuffer(RXedMsgByte)
-            if bufferFilling then return end
-            if crcError then
+        function(err, rxMsgTable)
+            if (err) then
                 COMMS_STATE = IDLE
                 return
             end
@@ -1003,39 +1148,37 @@ local COMM_STATES =
 
             local txMsgTable = makeMainRequest(MAIN_REQUEST_V4B)
             COMMS_STATE = EXPECTING_V4_REQ_B_DATA
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_MSG_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_V4_REQ_B_DATA] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError = updateMsgBuffer(RXedMsgByte)
-            if bufferFilling then return end
-            if (not crcError) then
+        function(err, rxMsgTable)
+            if (not err) then
                 unpackMessage(ver4ReqB, rxMsgTable)
             end
 
             COMMS_STATE = IDLE
-            sendToMeter(TX_END_OF_COMMS)
+            sendToMeter(TX_END_OF_COMMS, RX_FINISHED)
+            -- sequence complete
         end
     ,
     [EXPECTING_V3_REQ_DATA] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError = updateMsgBuffer(RXedMsgByte)
-            if bufferFilling then return end
-            if (not crcError) then
+        function(err, rxMsgTable)
+            if (not err) then
                 unpackMessage(ver3Req, rxMsgTable)
             end
 
             COMMS_STATE = IDLE
-            sendToMeter(TX_END_OF_COMMS)
+            sendToMeter(TX_END_OF_COMMS, RX_FINISHED)
+            -- sequence complete
         end
     ,
 --------------------------------------------------------------------------------
 --  specificDataRead
 --------------------------------------------------------------------------------
     [RD_SPECIFIC_DATA] =
-        function(junk)
-            debug('Entered RD_SPECIFIC_DATA')
+        function()
+            debug('Started RD_SPECIFIC_DATA transaction')
             setTxRxInterchangeTimeOut()
 
             local txMsgTable = {}
@@ -1046,43 +1189,40 @@ local COMM_STATES =
                 txMsgTable = makeMainRequest(MAIN_REQUEST_3)
                 COMMS_STATE = EXPECTING_VX_REQ_DATA_IGNORE_1
             end
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_MSG_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_VX_REQ_DATA_IGNORE_1] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError = updateMsgBuffer(RXedMsgByte)
-            if bufferFilling then return end
-            if crcError then
+        function(err, rxMsgTable)
+            if err then
                 COMMS_STATE = IDLE
                 return
             end
 
             local txMsgTable = makeSpecificReadRequest(m_MeterRdRegister)
             COMMS_STATE = EXPECTING_SPECIFIC_DATA
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_MSG_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_SPECIFIC_DATA] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError = updateMsgBuffer(RXedMsgByte)
-            if bufferFilling then return end
-            if crcError then
+        function(err, rxMsgTable)
+            if err then
                 COMMS_STATE = IDLE
                 return
             end
             unpackMessage(ver4ReqA, rxMsgTable)
 
             COMMS_STATE = IDLE
-            sendToMeter(TX_END_OF_COMMS)
+            sendToMeter(TX_END_OF_COMMS, RX_FINISHED)
+            -- sequence complete
         end
     ,
 --------------------------------------------------------------------------------
 -- specificDataWrite
 --------------------------------------------------------------------------------
     [WR_SPECIFIC_DATA] =
-        function(junk)
-            debug('Entered WR_SPECIFIC_DATA')
+        function()
+            debug('Started WR_SPECIFIC_DATA transaction')
             setTxRxInterchangeTimeOut()
 
             local txMsgTable = {}
@@ -1093,41 +1233,41 @@ local COMM_STATES =
                 txMsgTable = makeMainRequest(MAIN_REQUEST_3)
                 COMMS_STATE = EXPECTING_VX_REQ_DATA_IGNORE_2
             end
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_MSG_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_VX_REQ_DATA_IGNORE_2] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError = updateMsgBuffer(RXedMsgByte)
-            if bufferFilling then return end
-            if crcError then
+        function(err, rxMsgTable)
+            if (err) then
                 COMMS_STATE = IDLE
                 return
             end
             local txMsgTable = makePasswordSend()
             COMMS_STATE = EXPECTING_PW_ACK
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_ACK_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_PW_ACK] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError, ackRXed = updateMsgBuffer(RXedMsgByte)
-            if (not ackRXed) then
+        function(err, rxMsgTable)
+            -- rx problem or response ~= ACK
+            if (err) then
                 COMMS_STATE = IDLE
                 return
             end
 
             local txMsgTable = makeSpecificWriteRequest(m_MeterWrRegister, m_MeterWrData)
             COMMS_STATE = EXPECTING_WR_ACK
-            if (not sendToMeter(txMsgTable)) then COMMS_STATE = IDLE end
+            if (not sendToMeter(txMsgTable, RX_ACK_LENGTH)) then COMMS_STATE = IDLE end
         end
     ,
     [EXPECTING_WR_ACK] =
-        function(RXedMsgByte)
-            local bufferFilling, crcError, ackRXed = updateMsgBuffer(RXedMsgByte)
+        function(err, rxMsgTable)
             COMMS_STATE = IDLE
-            if (ackRXed) then
-                sendToMeter(TX_END_OF_COMMS)
+
+            -- if no rx problem or response ~= ACK
+            if (not err) then
+                sendToMeter(TX_END_OF_COMMS, RX_FINISHED)
+                -- sequence complete
             end
         end
     ,
@@ -1135,27 +1275,14 @@ local COMM_STATES =
 -- Do stuff all:
 --------------------------------------------------------------------------------
     [IDLE] =
-        function(RXedMsgChar)
-        -- if the comms gets out of whack, then processIncoming()
-		-- will (hopefully), dump the junk RXedMsgChar to here
+        function()
+        -- if the comms gets out of whack, then doProcessIncomingEKM()
+        -- will (hopefully), dump the junk err, rxMsgTable to here
         end
 }
 
--- Using the RAW protocol: this function gets called for every RX'ed byte
--- Function must be local to avoid collisions with "other" processIncoming functions.
--- Such as the L_Arduino.lua
-local function processIncoming(RXedMsgChar)
-    local RXedMsgByte = RXedMsgChar:byte()
-
-    -- debug('RXedMsgChar: '..RXedMsgChar..' '..string.format('%02X', RXedMsgByte))
-
-    if (COMM_STATES[COMMS_STATE] == nil) then
-        debug('COMMS_STATES or its index is invalid: '..COMMS_STATE)
-        return
-    end
-    COMM_STATES[COMMS_STATE](RXedMsgByte)
-end
-
+-- Keeps track of energy used per day starting at sunrise. It
+-- starts at sunrise, so it can be matched with a solar inverter.
 local function dailyResetCheck()
     -- make sure there are no communications already in progress
     if (COMMS_STATE ~= IDLE) then debug('dailyResetCheck NOT IDLE',50) return end
@@ -1174,25 +1301,25 @@ local function dailyResetCheck()
         m_MeterWrData     = {}
 
         COMMS_STATE = WR_SPECIFIC_DATA
-        COMM_STATES[COMMS_STATE](nil)
+        COMM_STATES[COMMS_STATE]()
 
         updateVariable('CountersNextReset', tostring(nextReset))
     end
 end
 
--- time out target; function needs to be global
+-- Time out target; function needs to be global
 function readMeterEKM()
     -- make sure there are no communications already in progress
     if (COMMS_STATE ~= IDLE) then return end
     debug('Reading meter')
 
     COMMS_STATE = RD_MAIN_DATA
-    COMM_STATES[COMMS_STATE](nil)
+    COMM_STATES[COMMS_STATE]()
 end
 
 -- Poll the meter for data
--- time out target; function needs to be global
-function pollMeter()
+-- Time out target; function needs to be global
+function pollEKMetering()
     if (m_PollEnable ~= '1') then return end
 
     -- at dawn, clear the daily kWh counters
@@ -1202,46 +1329,41 @@ function pollMeter()
     luup.call_delay('readMeterEKM', TRANSACTION_TIMEOUT_INTERVAL_SECS*2)
 
     -- get the meter info every poll interval
-    luup.call_delay('pollMeter', m_PollInterval)
+    luup.call_delay('pollEKMetering', m_PollInterval)
 end
 
 -- User service: polling on off
--- function needs to be global
-function polling(pollEnable)
+local function polling(pollEnable)
     if (not ((pollEnable == '0') or (pollEnable == '1'))) then return end
     m_PollEnable = pollEnable
     updateVariable('PollEnable', m_PollEnable)
 end
 
--- user service: set the metering function: from grid, to grid or net; from-to grid
--- function needs to be global
-function setMeteringFunction(meteringFunction)
+-- User service: set the metering function: from grid, to grid or net; from-to grid
+local function setMeteringFunction(meteringFunction)
     if (not ((meteringFunction == '0') or (meteringFunction == '1') or (meteringFunction == '2'))) then return end
     m_MeteringFunction = meteringFunction
     updateVariable('MeteringFunction', m_MeteringFunction)
 end
 
--- User service: set the meter serial number
--- function needs to be global
-function setMeterSerialNumber(meterSerialNumber)
+-- User service: set the meter serial number-- function needs to be global
+local function setMeterSerialNumber(meterSerialNumber)
     -- serial number must be a 12 digit number (stored as a string)
     meterSerialNumber = meterSerialNumber:match('^(%d%d%d%d%d%d%d%d%d%d%d%d)')
     if (meterSerialNumber:len() ~= 12) then return end
-    TX_METER_ADDRESS = stringToByteArray(meterSerialNumber)
+    TX_METER_ADDRESS = {meterSerialNumber:byte(1,#meterSerialNumber)}
     updateVariable('MeterSerialNumber', meterSerialNumber)
 end
 
--- user service: set the metering function: from grid, to grid or net: from minus to grid
--- function needs to be global
-function setUseSecondMeter(useSecondMeter)
+-- User service: set the metering function: from grid, to grid or net: from minus to grid
+local function setUseSecondMeter(useSecondMeter)
     if (not ((useSecondMeter == '0') or (useSecondMeter == '1') or (useSecondMeter == '2'))) then return end
     m_UseSecondMeter = useSecondMeter
     updateVariable('UseSecondMeter', useSecondMeter)
 end
 
--- user service: set the meter model
--- function needs to be global
-function setMeterModel(meterModel)
+-- User service: set the meter model
+local function setMeterModel(meterModel)
     if (not ((meterModel == '3') or (meterModel == '4'))) then return end
     m_MeterModel = meterModel
     updateVariable('MeterModel', m_MeterModel)
@@ -1257,7 +1379,7 @@ local function specificDataRead()
         m_MeterRdRegister = TX_RD_LAST_MTH_KWH
 
         COMMS_STATE = RD_SPECIFIC_DATA
-        COMM_STATES[COMMS_STATE](nil)
+        COMM_STATES[COMMS_STATE]()
     end
 end
 
@@ -1269,10 +1391,11 @@ local function specificDataWrite()
     if (COMMS_STATE == IDLE) then
         -- example
         m_MeterWrRegister = TX_WR_NEW_TIME
-        m_MeterWrData     = stringToByteArray(encodeMeterTime())
+        local meterTime = encodeMeterTime()
+        m_MeterWrData = {meterTime:byte(1,#meterTime)}
 
         COMMS_STATE = WR_SPECIFIC_DATA
-        COMM_STATES[COMMS_STATE](nil)
+        COMM_STATES[COMMS_STATE]()
     end
 end
 
@@ -1285,22 +1408,17 @@ function luaStartUp(lul_device)
     debug('Initialising plugin: '..PLUGIN_NAME)
 
     -- Lua ver 5.1 does not have bit functions, whereas ver 5.2 and above do
-    debug('Using: '.._VERSION)
-
-    if (bitFunctions == nil) then
-        debug('Bit library not found\n')
-        return false, 'Bit library not found', PLUGIN_NAME
-    end
+    debug('Using: '.._VERSION)   -- returns the string: 'Lua x.y'
 
     -- set up some defaults:
     updateVariable('PluginVersion', PLUGIN_VERSION)
 
     local debugEnabled = luup.variable_get(PLUGIN_SID, 'DebugEnabled', THIS_LUL_DEVICE)
     if ((debugEnabled == nil) or (debugEnabled == '')) then
-	    debugEnabled = '0'
+        debugEnabled = '0'
         updateVariable('DebugEnabled', debugEnabled)
     end
-	DEBUG_MODE = (debugEnabled == '1')
+    DEBUG_MODE = (debugEnabled == '1')
 
     local pluginEnabled     = luup.variable_get(PLUGIN_SID,       'PluginEnabled',     THIS_LUL_DEVICE)
     local wholeHouse        = luup.variable_get(ENERGY_METER_SID, 'WholeHouse',        THIS_LUL_DEVICE)
@@ -1315,7 +1433,7 @@ function luaStartUp(lul_device)
     local countersNextReset = luup.variable_get(PLUGIN_SID,       'CountersNextReset', THIS_LUL_DEVICE)
 
     if ((pluginEnabled == nil) or (pluginEnabled == '')) then
-	    pluginEnabled = '1'
+        pluginEnabled = '1'
         updateVariable('PluginEnabled', pluginEnabled)
     end
 
@@ -1404,7 +1522,7 @@ function luaStartUp(lul_device)
         luup.variable_set(PLUGIN_SID, 'MeterSerialNumber', meterSerialNumber, THIS_LUL_DEVICE)
         -- TX_METER_ADDRESS equals the default address '999999999999' at this point
     else
-        TX_METER_ADDRESS = stringToByteArray(meterSerialNumber)
+        TX_METER_ADDRESS = {meterSerialNumber:byte(1,#meterSerialNumber)}
     end
 
     if ((m_MeterModel == '') or (meterSerialNumber == '')) then
@@ -1425,11 +1543,15 @@ function luaStartUp(lul_device)
     if (ipPort == nil) then ipPort = IP_PORT end
 
     debug('Using IP address: '..ipAddress..':'..ipPort)
-    luup.io.open(THIS_LUL_DEVICE, ipAddress, ipPort)
+    m_tcp = assert(socket.tcp())
+    -- so that alternate read/write works as expected (no buffering)
+    m_tcp:setoption('tcp-nodelay', true)
+    m_tcp:settimeout(0)
+    m_tcp:connect(ipAddress, tonumber(ipPort))
 
     -- delay so that the first poll occurs delay interval after start up
     local INITIAL_POLL_INTERVAL_SECS = 70
-    luup.call_delay('pollMeter', INITIAL_POLL_INTERVAL_SECS)
+    luup.call_delay('pollEKMetering', INITIAL_POLL_INTERVAL_SECS)
 
     return true, 'All OK', PLUGIN_NAME
 end
